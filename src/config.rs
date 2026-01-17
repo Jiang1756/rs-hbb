@@ -56,8 +56,12 @@ lazy_static::lazy_static! {
     static ref STATUS: RwLock<Status> = RwLock::new(Status::load());
     static ref TRUSTED_DEVICES: RwLock<(Vec<TrustedDevice>, bool)> = Default::default();
     static ref ONLINE: Mutex<HashMap<String, i64>> = Default::default();
-    pub static ref PROD_RENDEZVOUS_SERVER: RwLock<String> = RwLock::new("".to_owned());
+    pub static ref PROD_RENDEZVOUS_SERVER: RwLock<String> = RwLock::new(option_env!("RENDEZVOUS_SERVER").unwrap_or("").to_owned());
     pub static ref EXE_RENDEZVOUS_SERVER: RwLock<String> = Default::default();
+    // 编译时注入的 Relay Server 地址（通过 RS_RELAY 环境变量）
+    pub static ref PROD_RELAY_SERVER: RwLock<String> = RwLock::new(option_env!("RS_RELAY").unwrap_or("").to_owned());
+    // 编译时注入的 API Server 地址（通过 API_SERVER 环境变量）
+    pub static ref PROD_API_SERVER: RwLock<String> = RwLock::new(option_env!("API_SERVER").unwrap_or("").to_owned());
     pub static ref APP_NAME: RwLock<String> = RwLock::new("RustDesk".to_owned());
     static ref KEY_PAIR: Mutex<Option<KeyPair>> = Default::default();
     static ref USER_DEFAULT_CONFIG: RwLock<(UserDefaultConfig, Instant)> = RwLock::new((UserDefaultConfig::load(), Instant::now()));
@@ -106,8 +110,8 @@ const CHARS: &[char] = &[
     'm', 'n', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
 ];
 
-pub const RENDEZVOUS_SERVERS: &[&str] = &["rs-ny.rustdesk.com"];
-pub const RS_PUB_KEY: &str = "OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=";
+pub const RENDEZVOUS_SERVERS: &[&str] = &[option_env!("RENDEZVOUS_SERVER").unwrap_or("rs-ny.rustdesk.com")];
+pub const RS_PUB_KEY: &str = option_env!("RS_PUB_KEY").unwrap_or("OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=");
 
 pub const RENDEZVOUS_PORT: i32 = 21116;
 pub const RELAY_PORT: i32 = 21117;
@@ -1071,13 +1075,32 @@ impl Config {
     }
 
     pub fn get_option(k: &str) -> String {
-        get_or(
+        let value = get_or(
             &OVERWRITE_SETTINGS,
             &CONFIG2.read().unwrap().options,
             &DEFAULT_SETTINGS,
             k,
         )
-        .unwrap_or_default()
+        .unwrap_or_default();
+        // 如果配置为空，回退到编译时环境变量
+        if value.is_empty() {
+            match k {
+                "relay-server" => {
+                    let prod_relay = PROD_RELAY_SERVER.read().unwrap().clone();
+                    if !prod_relay.is_empty() {
+                        return prod_relay;
+                    }
+                }
+                "api-server" => {
+                    let prod_api = PROD_API_SERVER.read().unwrap().clone();
+                    if !prod_api.is_empty() {
+                        return prod_api;
+                    }
+                }
+                _ => {}
+            }
+        }
+        value
     }
 
     pub fn get_bool_option(k: &str) -> bool {
